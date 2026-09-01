@@ -13,14 +13,11 @@ st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 # ================= 2. Load Data and Model =================
 @st.cache_data
 def load_data():
-    # Load data from the correct folder path
     df = pd.read_csv("dashboard/dashboard_data.csv")
     
-    # Calculate HourOfDay for the charts (if it doesn't exist in the sample)
     if 'HourOfDay' not in df.columns and 'TransactionDT' in df.columns:
         df['HourOfDay'] = (df['TransactionDT'] // 3600) % 24
         
-    # Add mock Fraud_Probability to prevent crashes on Pages 2 and 3 (if missing)
     if 'Fraud_Probability' not in df.columns:
         np.random.seed(42)
         df['Fraud_Probability'] = np.random.uniform(0.0, 1.0, size=len(df))
@@ -29,10 +26,8 @@ def load_data():
 
 @st.cache_resource
 def load_model():
-    # Load the trained XGBoost model
     return joblib.load("dashboard/xgb_model.pkl")
 
-# Assign Data and Model to variables
 df = load_data()
 model = load_model()
 
@@ -44,13 +39,11 @@ page = st.sidebar.radio("Go to:", ["Overview", "Transaction Explorer", "SHAP Exp
 if page == "Overview":
     st.title("Fraud Operations Overview")
     
-    # Calculate Key Metrics
     total_transactions = len(df)
     total_fraud = len(df[df['isFraud'] == 1]) if 'isFraud' in df.columns else 0
     detection_rate = (total_fraud / total_transactions) * 100 if total_transactions > 0 else 0
     avg_fraud_amount = df[df['isFraud'] == 1]['TransactionAmt'].mean() if total_fraud > 0 else 0
     
-    # Display Metrics in Columns
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Transactions", f"{total_transactions:,}")
     col2.metric("Total Fraud Count", f"{total_fraud:,}")
@@ -59,7 +52,6 @@ if page == "Overview":
     
     st.markdown("---")
     
-    # Plotly Interactive Charts
     col_chart1, col_chart2 = st.columns(2)
     
     with col_chart1:
@@ -83,16 +75,13 @@ if page == "Overview":
 elif page == "Transaction Explorer":
     st.title("Live Transaction Explorer")
     
-    # Sidebar Filters
     min_prob = st.sidebar.slider("Filter by Minimum Fraud Probability", 0.0, 1.0, 0.0)
     filtered_df = df[df['Fraud_Probability'] >= min_prob]
     
-    # Search Box
     search_id = st.text_input("Search by exact TransactionID:")
     if search_id:
         filtered_df = filtered_df[filtered_df['TransactionID'].astype(str) == search_id]
         
-    # Display Table with Live Risk Score
     cols_to_show = ['TransactionID', 'TransactionAmt', 'HourOfDay', 'Fraud_Probability', 'isFraud']
     available_cols = [c for c in cols_to_show if c in filtered_df.columns]
     st.dataframe(filtered_df[available_cols])
@@ -105,7 +94,6 @@ elif page == "SHAP Explainer":
     txn_id = st.text_input("Enter TransactionID to Generate Explanation:")
     
     if txn_id:
-        # Find the specific transaction
         txn_data = df[df['TransactionID'].astype(str) == txn_id]
         
         if len(txn_data) == 0:
@@ -114,24 +102,51 @@ elif page == "SHAP Explainer":
             prob = txn_data['Fraud_Probability'].values[0]
             st.success(f"Transaction Found! Fraud Risk Probability: {prob:.4f}")
             
-            # Extract only the features needed for the model (drop IDs and labels)
+            # Extract only the features needed for the model
             cols_to_drop = ['TransactionID', 'isFraud', 'Fraud_Probability']
             drop_cols = [c for c in cols_to_drop if c in txn_data.columns]
             features_only = txn_data.drop(columns=drop_cols)
-   
-            # Generate SHAP values for this specific transaction
+            
+            # 1. Align features exactly with what the model expects
+            booster = model.get_booster() if hasattr(model, 'get_booster') else model
+            expected_cols = booster.feature_names
+            if expected_cols:
+                valid_cols = [c for c in expected_cols if c in features_only.columns]
+                features_only = features_only[valid_cols]
+            
+            # 2. Convert object columns to category as strictly required by XGBoost
+            for col in features_only.select_dtypes(include=['object']).columns:
+                features_only[col] = features_only[col].astype('category')
+            
+            # --- 100% ROBUST FIX: Bypass SHAP bug using XGBoost Native SHAP Calculation ---
             try:
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer(features_only)
+                # Create DMatrix explicitly with the missing enable_categorical flag
+                dmatrix = xgb.DMatrix(features_only, enable_categorical=True)
+                
+                # Get SHAP values directly from the XGBoost engine
+                shap_contribs = booster.predict(dmatrix, pred_contribs=True)
+                
+                # Separate SHAP values (features) and base value (bias)
+                shap_values_matrix = shap_contribs[:, :-1]
+                base_value = shap_contribs[0, -1]
+                
+                # Construct SHAP Explanation manually for the visualization
+                explanation = shap.Explanation(
+                    values=shap_values_matrix[0],
+                    base_values=base_value,
+                    data=features_only.iloc[0],
+                    feature_names=features_only.columns.tolist()
+                )
                 
                 # Display the Waterfall Plot
                 fig, ax = plt.subplots(figsize=(8, 4))
-                shap.plots.waterfall(shap_values[0], show=False)
+                shap.plots.waterfall(explanation, show=False)
                 st.pyplot(fig)
+                
             except Exception as e:
                 st.error(f"Error generating SHAP chart: {e}")
+            # ------------------------------------------------------------------------------
             
-            # Plain English Explanation based on probability tiers
             st.markdown("### Business Explanation")
             if prob >= 0.75:
                 st.error("This transaction is classified as **CRITICAL RISK**. The red bars in the chart show the suspicious features (like unusual time or amount) that pushed the risk score very high.")
