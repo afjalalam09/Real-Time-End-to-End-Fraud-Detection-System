@@ -1,7 +1,6 @@
-xgboost,
-streamlit,
-scikit-learn, 
-shap, 
-pandas, 
-numba, 
-cloudpickle
+streamlit
+pandas
+numpy
+scikit-learn
+xgboost
+shap
