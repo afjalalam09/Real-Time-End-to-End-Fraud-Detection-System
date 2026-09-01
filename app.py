@@ -12,11 +12,11 @@ st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 # 2. Load Data and Model (Cached for performance)
 @st.cache_data
 def load_data():
-    return pd.read_csv("data/dashboard/dashboard_data.csv")
+    return pd.read_csv("dashboard/dashboard_data.csv")
 
 @st.cache_resource
 def load_model():
-    return joblib.load("data/dashboard/xgb_model.pkl")
+    return joblib.load("dashboard/xgb_model.pkl")
 
 df = load_data()
 model = load_model()
