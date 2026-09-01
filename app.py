@@ -118,19 +118,7 @@ elif page == "SHAP Explainer":
             cols_to_drop = ['TransactionID', 'isFraud', 'Fraud_Probability']
             drop_cols = [c for c in cols_to_drop if c in txn_data.columns]
             features_only = txn_data.drop(columns=drop_cols)
-
-            # Extract only the features needed for the model (drop IDs and labels)
-            cols_to_drop = ['TransactionID', 'isFraud', 'Fraud_Probability']
-            drop_cols = [c for c in cols_to_drop if c in txn_data.columns]
-            features_only = txn_data.drop(columns=drop_cols)
-            
-            # --- YEH 2 NAYI LINES ADD KAREIN (Fix for String/Category Error) ---
-            for col in features_only.select_dtypes(include=['object']).columns:
-                features_only[col] = features_only[col].astype('category')
-            # -------------------------------------------------------------------
-            
-            # Generate SHAP values for this specific transaction
-            
+   
             # Generate SHAP values for this specific transaction
             try:
                 explainer = shap.TreeExplainer(model)
