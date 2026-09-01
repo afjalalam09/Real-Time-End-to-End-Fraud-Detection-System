@@ -13,14 +13,14 @@ st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 # ================= 2. Load Data and Model =================
 @st.cache_data
 def load_data():
-    # Sahi folder path se data load karna
+    # Load data from the correct folder path
     df = pd.read_csv("dashboard/dashboard_data.csv")
     
-    # Chart error fix karne ke liye HourOfDay calculate karein (agar nahi hai toh)
+    # Calculate HourOfDay for the charts (if it doesn't exist in the sample)
     if 'HourOfDay' not in df.columns and 'TransactionDT' in df.columns:
         df['HourOfDay'] = (df['TransactionDT'] // 3600) % 24
         
-    # Page 2 aur 3 ko crash se bachane ke liye Fraud_Probability add karein (agar nahi hai toh)
+    # Add mock Fraud_Probability to prevent crashes on Pages 2 and 3 (if missing)
     if 'Fraud_Probability' not in df.columns:
         np.random.seed(42)
         df['Fraud_Probability'] = np.random.uniform(0.0, 1.0, size=len(df))
@@ -29,10 +29,10 @@ def load_data():
 
 @st.cache_resource
 def load_model():
-    # Sahi folder path se model load karna
+    # Load the trained XGBoost model
     return joblib.load("dashboard/xgb_model.pkl")
 
-# Data aur Model ko variables mein daalna (Yeh miss ho gaya tha!)
+# Assign Data and Model to variables
 df = load_data()
 model = load_model()
 
@@ -68,7 +68,7 @@ if page == "Overview":
             fig1 = px.histogram(df, x="TransactionAmt", color="isFraud", log_y=True, nbins=50)
             st.plotly_chart(fig1, use_container_width=True)
         else:
-            st.warning("TransactionAmt ya isFraud column data mein nahi hai.")
+            st.warning("TransactionAmt or isFraud column is missing from the data.")
         
     with col_chart2:
         st.subheader("Fraud Count by Hour of Day")
@@ -77,7 +77,7 @@ if page == "Overview":
             fig2 = px.histogram(fraud_df, x="HourOfDay", nbins=24)
             st.plotly_chart(fig2, use_container_width=True)
         else:
-            st.warning("HourOfDay column data mein nahi mila.")
+            st.warning("HourOfDay column not found in the data.")
 
 # ================= PAGE 2: TRANSACTION EXPLORER =================
 elif page == "Transaction Explorer":
@@ -129,7 +129,7 @@ elif page == "SHAP Explainer":
                 shap.plots.waterfall(shap_values[0], show=False)
                 st.pyplot(fig)
             except Exception as e:
-                st.error(f"SHAP chart generate karne mein problem aayi: {e}")
+                st.error(f"Error generating SHAP chart: {e}")
             
             # Plain English Explanation based on probability tiers
             st.markdown("### Business Explanation")
