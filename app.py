@@ -15,12 +15,19 @@ st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 def load_data():
     df = pd.read_csv("dashboard/dashboard_data.csv")
     
+    # Calculate HourOfDay if missing
     if 'HourOfDay' not in df.columns and 'TransactionDT' in df.columns:
         df['HourOfDay'] = (df['TransactionDT'] // 3600) % 24
         
+    # Generate mock probabilities to prevent crashes if missing
     if 'Fraud_Probability' not in df.columns:
         np.random.seed(42)
         df['Fraud_Probability'] = np.random.uniform(0.0, 1.0, size=len(df))
+        
+    # --- THE FIX: Convert object columns to categories globally ---
+    # This ensures n_categories > 0 for XGBoost DMatrix at all times
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].astype('category')
         
     return df
 
@@ -39,6 +46,7 @@ page = st.sidebar.radio("Go to:", ["Overview", "Transaction Explorer", "SHAP Exp
 if page == "Overview":
     st.title("Fraud Operations Overview")
     
+    # Calculate Key Metrics
     total_transactions = len(df)
     total_fraud = len(df[df['isFraud'] == 1]) if 'isFraud' in df.columns else 0
     detection_rate = (total_fraud / total_transactions) * 100 if total_transactions > 0 else 0
@@ -102,35 +110,29 @@ elif page == "SHAP Explainer":
             prob = txn_data['Fraud_Probability'].values[0]
             st.success(f"Transaction Found! Fraud Risk Probability: {prob:.4f}")
             
-            # Extract only the features needed for the model
+            # Drop unnecessary columns
             cols_to_drop = ['TransactionID', 'isFraud', 'Fraud_Probability']
             drop_cols = [c for c in cols_to_drop if c in txn_data.columns]
             features_only = txn_data.drop(columns=drop_cols)
             
-            # 1. Align features exactly with what the model expects
+            # Ensure the features align perfectly with what the model expects
             booster = model.get_booster() if hasattr(model, 'get_booster') else model
             expected_cols = booster.feature_names
             if expected_cols:
                 valid_cols = [c for c in expected_cols if c in features_only.columns]
                 features_only = features_only[valid_cols]
             
-            # 2. Convert object columns to category as strictly required by XGBoost
-            for col in features_only.select_dtypes(include=['object']).columns:
-                features_only[col] = features_only[col].astype('category')
-            
-            # --- 100% ROBUST FIX: Bypass SHAP bug using XGBoost Native SHAP Calculation ---
             try:
-                # Create DMatrix explicitly with the missing enable_categorical flag
+                # Create DMatrix with enable_categorical=True
+                # The data is already correctly formatted as categorical from load_data()
                 dmatrix = xgb.DMatrix(features_only, enable_categorical=True)
                 
-                # Get SHAP values directly from the XGBoost engine
+                # Extract SHAP values directly from XGBoost C++ backend
                 shap_contribs = booster.predict(dmatrix, pred_contribs=True)
-                
-                # Separate SHAP values (features) and base value (bias)
                 shap_values_matrix = shap_contribs[:, :-1]
                 base_value = shap_contribs[0, -1]
                 
-                # Construct SHAP Explanation manually for the visualization
+                # Construct SHAP explanation object
                 explanation = shap.Explanation(
                     values=shap_values_matrix[0],
                     base_values=base_value,
@@ -138,15 +140,15 @@ elif page == "SHAP Explainer":
                     feature_names=features_only.columns.tolist()
                 )
                 
-                # Display the Waterfall Plot
+                # Render Waterfall Plot
                 fig, ax = plt.subplots(figsize=(8, 4))
                 shap.plots.waterfall(explanation, show=False)
                 st.pyplot(fig)
                 
             except Exception as e:
                 st.error(f"Error generating SHAP chart: {e}")
-            # ------------------------------------------------------------------------------
             
+            # Display business context
             st.markdown("### Business Explanation")
             if prob >= 0.75:
                 st.error("This transaction is classified as **CRITICAL RISK**. The red bars in the chart show the suspicious features (like unusual time or amount) that pushed the risk score very high.")
